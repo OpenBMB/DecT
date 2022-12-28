@@ -1,0 +1,1 @@
+{"placeholder": "text_a"} {"placeholder": "text_b"} The category of {"placeholder": "text_a"} is {"mask"}.
