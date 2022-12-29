@@ -1,6 +1,6 @@
 #!/bin/sh
 
-python download_glue_data.py --data_dir ./ --tasks MNLI, RTE
+python download_glue_data.py --data_dir ./ --tasks MNLI,RTE
 
 mv MNLI mnli
 mv RTE rte
@@ -33,10 +33,9 @@ mv FewNERD fewnerd
 rm -rf FewNERD.tar.gz
 
 rm -rf snli
-wget --content-disposition https://cloud.tsinghua.edu.cn/f/4a6697a9088043569f95/?dl=1
-unzip snli_1.0.zip
-mv snli_1.0 snli
-rm -rf snil_1.0.zip
+wget --content-disposition https://cloud.tsinghua.edu.cn/f/a1cf011883a845c7833f/?dl=1
+unzip snli.zip
+rm -rf snli.zip
 
 rm -rf yelp
 wget --content-disposition https://cloud.tsinghua.edu.cn/f/f3c8714d6a5c4b97b612/?dl=1
@@ -45,8 +44,6 @@ mv yelp_review_polarity_csv yelp
 rm -rf yelp_review_polarity_csv.tgz
 
 rm -rf yahoo
-mkdir yahoo
-cd yahoo
 wget --content-disposition https://cloud.tsinghua.edu.cn/f/640cb6cdc1864f89bd58/?dl=1
 unzip yahoo.zip
 rm -rf yahoo.zip

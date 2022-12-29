@@ -5,7 +5,6 @@ from os import stat
 from transformers.file_utils import ModelOutput
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.utils.dummy_pt_objects import PreTrainedModel
-from yacs.config import CfgNode
 from openprompt.data_utils import InputExample, InputFeatures
 import re
 from openprompt import Verbalizer
@@ -13,11 +12,8 @@ from typing import *
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from openprompt.utils.logging import logger
 import copy
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions, Seq2SeqLMOutput, MaskedLMOutput
-
-from transformers.models.t5 import  T5ForConditionalGeneration
 
 class DecTVerbalizer(Verbalizer):
     r"""
@@ -31,13 +27,13 @@ class DecTVerbalizer(Verbalizer):
         multi_token_handler (:obj:`str`, optional): The handling strategy for multiple tokens produced by the tokenizer.
         post_log_softmax (:obj:`bool`, optional): Whether to apply log softmax post processing on label_logits. Default to True.
         lr: (:obj:`float`, optional): The learning rate for prototypes.
+        hidden_size: (:obj:`int`, optional): The dimension of model hidden states.
         mid_dim: (:obj:`int`, optional): The dimension of prototype embeddings.
         epochs: (:obj:`int`, optional): The training epochs of prototypes.
-        multi_verb (:obj:`str`, optional): `multi` to ensemble with manual verbalizers, `proto` to use only ProtoVerb.
+        model_logits_weight: (:obj:`float`, optional): Weight factor (\lambda) for model logits.
     """
     def __init__(self, 
                  tokenizer: Optional[PreTrainedTokenizer],
-                 model: Optional[PreTrainedModel],
                  classes: Optional[List] = None,
                  num_classes: Optional[Sequence[str]] = None,
                  label_words: Optional[Union[Sequence[str], Mapping[str, str]]] = None,
@@ -57,7 +53,6 @@ class DecTVerbalizer(Verbalizer):
         self.lr = lr
         self.mid_dim = mid_dim
         self.epochs = epochs
-        self.trained = False
         self.model_logits_weight = model_logits_weight
         
         self.hidden_dims = hidden_size
@@ -69,7 +64,6 @@ class DecTVerbalizer(Verbalizer):
         self.proto = nn.Parameter(w, requires_grad=False)
         r = torch.ones(self.num_classes)
         self.proto_r = nn.Parameter(r, requires_grad=True)
-        #self.num_train = nn.Parameter(torch.tensor(1.0), requires_grad=True)
         self.optimizer = torch.optim.Adam(self.group_parameters_proto, lr=self.lr)
         
     @property
@@ -237,18 +231,11 @@ class DecTVerbalizer(Verbalizer):
             :obj:`torch.Tensor`: The calibrated probability of label words.
         """
         shape = label_words_probs.shape
-        #assert self._calibrate_logits.dim() ==  1, "self._calibrate_logits are not 1-d tensor"
-        #calibrate_label_words_probs = self.normalize(self.project(self._calibrate_logits.unsqueeze(0), **kwargs))
         calibrate_label_words_probs = self._calibrate_logits
         assert calibrate_label_words_probs.shape[1:] == label_words_probs.shape[1:] \
              and calibrate_label_words_probs.shape[0]==1, "shape not match"
         label_words_probs /= (calibrate_label_words_probs+1e-15)
-        # normalize # TODO Test the performance
-        '''
-        norm = label_words_probs.reshape(shape[0], -1).sum(dim=-1,keepdim=True) # TODO Test the performance of detaching()
-        label_words_probs = label_words_probs.reshape(shape[0], -1) / norm
-        label_words_probs = label_words_probs.reshape(*shape)
-        '''
+        
         return label_words_probs
 
     def process_outputs(self, outputs: Union[torch.Tensor, torch.Tensor], batch: Union[Dict, InputFeatures], **kwargs):
@@ -277,7 +264,7 @@ class DecTVerbalizer(Verbalizer):
         return -dist
     
     def loss_func(self, x, model_logits, labels):
-        sim_mat = torch.exp(self.sim(v_ins, self.proto, self.proto_r, model_logits, self.model_logits_weight))
+        sim_mat = torch.exp(self.sim(x, self.proto, self.proto_r, model_logits, self.model_logits_weight))
         pos_score = torch.sum(sim_mat * F.one_hot(labels), -1)
         loss = -torch.mean(torch.log(pos_score / sim_mat.sum(-1)))
         
@@ -285,7 +272,7 @@ class DecTVerbalizer(Verbalizer):
 
 
 
-    def train_proto(self, model, dataloader, calibrate_dataloader, device):
+    def train_proto(self, model, dataloader, calibrate_dataloader):
         model.eval()
         embeds = [[] for _ in range(self.num_classes)]
         labels = [[] for _ in range(self.num_classes)]
@@ -295,7 +282,7 @@ class DecTVerbalizer(Verbalizer):
         with torch.no_grad():
             # collect calibration logits
             for i, batch in enumerate(calibrate_dataloader):
-                batch = batch.to("cuda:{}".format(device)).to_dict()
+                batch = batch.cuda().to_dict()
                 outputs = model.prompt_model(batch)
                 outputs = self.gather_outputs(outputs)
                 logits = self.project(model.extract_at_mask(outputs[1], batch))
@@ -303,7 +290,7 @@ class DecTVerbalizer(Verbalizer):
 
             # collect model logits and hidden states
             for i, batch in enumerate(dataloader):
-                batch = batch.to("cuda:{}".format(device)).to_dict()
+                batch = batch.cuda().to_dict()
                 outputs = model.prompt_model(batch)
                 outputs = self.gather_outputs(outputs)
                 hidden, logits = model.extract_at_mask(outputs[0], batch), model.extract_at_mask(outputs[1], batch)
@@ -317,7 +304,7 @@ class DecTVerbalizer(Verbalizer):
             
         embeds = list(map(torch.stack, embeds))
         labels = torch.cat(list(map(torch.stack, labels)))
-        model_logits = torch.cat(list(map(torch.stack, manual_logits)))
+        model_logits = torch.cat(list(map(torch.stack, model_logits)))
 
         dist = list(map(lambda x: torch.norm(self.head(x) - self.head(x.mean(0)), dim=-1).mean(), embeds))
         self.proto_r.data = torch.stack(dist)
@@ -330,10 +317,9 @@ class DecTVerbalizer(Verbalizer):
             loss = self.loss_func(x, model_logits, labels)
             loss.backward()
             self.optimizer.step()
-        logger.info("Total epoch: {}. ProtoVerb loss: {}".format(self.epochs, loss))
-        print(self.proto_r)
+        print("Total epoch: {}. DecT loss: {}".format(self.epochs, loss))
         end_time = time.time()
-        logger.info("Training time: {}".format(end_time - start_time))
+        print("Training time: {}".format(end_time - start_time))
 
     
 

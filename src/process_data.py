@@ -1,26 +1,8 @@
-
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""
-This file contains the logic for loading data.
-"""
-
 import os
 import json, csv
 from abc import ABC, abstractmethod
 from collections import defaultdict, Counter
 from typing import *
-from transformers.tokenization_utils import SPECIAL_TOKENS_MAP_FILE
 import pandas as pd
 from openprompt.utils.logging import logger
 from openprompt.data_utils.utils import InputExample
@@ -33,7 +15,7 @@ def load_dataset(dataset):
     """
 
     processor = PROCESSORS[dataset.lower()]()
-    path = 'datasets/' + dataset.lower()
+    path = 'datasets/' + dataset.lower().split('-')[0]
 
     train_dataset = None
     valid_dataset = None
@@ -65,7 +47,7 @@ def load_dataset(dataset):
 class MnlimmProcessor(DataProcessor):
     # TODO Test needed
     dataset_project = {"train": "train",
-                        "dev": "dev_mismatched",
+                        "dev": "train",
                         "test": "dev_mismatched"
                         }
     def __init__(self):
@@ -91,7 +73,7 @@ class MnlimmProcessor(DataProcessor):
 class MnlimProcessor(DataProcessor):
     # TODO Test needed
     dataset_project = {"train": "train",
-                        "dev": "dev_matched",
+                        "dev": "train",
                         "test": "dev_matched"
                         }
     def __init__(self):
@@ -120,28 +102,6 @@ class AgnewsProcessor(DataProcessor):
     `AG News <https://arxiv.org/pdf/1509.01626.pdf>`_ is a News Topic classification dataset
     
     we use dataset provided by `LOTClass <https://github.com/yumeng5/LOTClass>`_
-
-    Examples:
-
-    ..  code-block:: python
-
-        from openprompt.data_utils.text_classification_dataset import PROCESSORS
-
-        base_path = "datasets/TextClassification"
-
-        dataset_name = "agnews"
-        dataset_path = os.path.join(base_path, dataset_name)
-        processor = PROCESSORS[dataset_name.lower()]()
-        trainvalid_dataset = processor.get_train_examples(dataset_path)
-        test_dataset = processor.get_test_examples(dataset_path)
-
-        assert processor.get_num_labels() == 4
-        assert processor.get_labels() == ["World", "Sports", "Business", "Tech"]
-        assert len(trainvalid_dataset) == 120000
-        assert len(test_dataset) == 7600
-        assert test_dataset[0].text_a == "Fears for T N pension after talks"
-        assert test_dataset[0].text_b == "Unions representing workers at Turner   Newall say they are 'disappointed' after talks with stricken parent firm Federal Mogul."
-        assert test_dataset[0].label == 2
     """
 
     def __init__(self):
@@ -166,24 +126,6 @@ class DBpediaProcessor(DataProcessor):
     `Dbpedia <https://aclanthology.org/L16-1532.pdf>`_ is a Wikipedia Topic Classification dataset.
 
     we use dataset provided by `LOTClass <https://github.com/yumeng5/LOTClass>`_
-
-    Examples:
-
-    ..  code-block:: python
-
-        from openprompt.data_utils.text_classification_dataset import PROCESSORS
-
-        base_path = "datasets/TextClassification"
-
-        dataset_name = "dbpedia"
-        dataset_path = os.path.join(base_path, dataset_name)
-        processor = PROCESSORS[dataset_name.lower()]()
-        trainvalid_dataset = processor.get_train_examples(dataset_path)
-        test_dataset = processor.get_test_examples(dataset_path)
-
-        assert processor.get_num_labels() == 14
-        assert len(trainvalid_dataset) == 560000
-        assert len(test_dataset) == 70000
     """
 
     def __init__(self):
@@ -210,24 +152,6 @@ class ImdbProcessor(DataProcessor):
     `IMDB <https://ai.stanford.edu/~ang/papers/acl11-WordVectorsSentimentAnalysis.pdf>`_ is a Movie Review Sentiment Classification dataset.
 
     we use dataset provided by `LOTClass <https://github.com/yumeng5/LOTClass>`_
-
-    Examples:
-
-    ..  code-block:: python
-
-        from openprompt.data_utils.text_classification_dataset import PROCESSORS
-
-        base_path = "datasets/TextClassification"
-
-        dataset_name = "imdb"
-        dataset_path = os.path.join(base_path, dataset_name)
-        processor = PROCESSORS[dataset_name.lower()]()
-        trainvalid_dataset = processor.get_train_examples(dataset_path)
-        test_dataset = processor.get_test_examples(dataset_path)
-
-        assert processor.get_num_labels() == 2
-        assert len(trainvalid_dataset) == 25000
-        assert len(test_dataset) == 25000
     """
 
     def __init__(self):
@@ -255,14 +179,6 @@ class ImdbProcessor(DataProcessor):
 class YahooProcessor(DataProcessor):
     """
     Yahoo! Answers Topic Classification Dataset
-    
-    Examples:
-
-    ..  code-block:: python
-
-        from openprompt.data_utils.text_classification_dataset import PROCESSORS
-
-        base_path = "datasets/TextClassification"
     """
 
     def __init__(self):
@@ -291,32 +207,9 @@ class SST2Processor(DataProcessor):
 
     We use the data released in `Making Pre-trained Language Models Better Few-shot Learners (Gao et al. 2020) <https://arxiv.org/pdf/2012.15723.pdf>`_
 
-    Examples:
-
-    ..  code-block:: python 
-
-        from openprompt.data_utils.lmbff_dataset import PROCESSORS
-
-        base_path = "datasets/TextClassification"
-
-        dataset_name = "SST-2"
-        dataset_path = os.path.join(base_path, dataset_name)
-        processor = PROCESSORS[dataset_name.lower()]()
-        train_dataset = processor.get_train_examples(dataset_path)
-        dev_dataset = processor.get_dev_examples(dataset_path)
-        test_dataset = processor.get_test_examples(dataset_path)
-
-        assert processor.get_num_labels() == 2
-        assert processor.get_labels() == ['0','1']
-        assert len(train_dataset) == 6920
-        assert len(dev_dataset) == 872
-        assert len(test_dataset) == 1821
-        assert train_dataset[0].text_a == 'a stirring , funny and finally transporting re-imagining of beauty and the beast and 1930s horror films'
-        assert train_dataset[0].label == 1
-
     """
     dataset_project = {"train": "train",
-                        "dev": "dev",
+                        "dev": "train",
                         "test": "dev"
                         }
     def __init__(self):
@@ -340,7 +233,7 @@ class SST2Processor(DataProcessor):
 
 class SnliProcessor(DataProcessor):
     dataset_project = {"train": "snli_1.0_train",
-                        "dev": "snli_1.0_dev",
+                        "dev": "snli_1.0_train",
                         "test": "snli_1.0_dev"
                         }
     def __init__(self):
@@ -366,7 +259,7 @@ class SnliProcessor(DataProcessor):
 
 class YelpProcessor(DataProcessor):
     dataset_project = {"train": "train",
-                        "dev": None,
+                        "dev": "train",
                         "test": "test"
                         }
     def __init__(self):
@@ -388,7 +281,7 @@ class YelpProcessor(DataProcessor):
 
 class RteProcessor(DataProcessor):
     dataset_project = {"train": "train",
-                        "dev": "dev",
+                        "dev": "train",
                         "test": "dev"
                         }
     def __init__(self):
@@ -415,36 +308,6 @@ class FewNERDProcessor(DataProcessor):
     `Few-NERD <https://ningding97.github.io/fewnerd/>`_ a large-scale, fine-grained manually annotated named entity recognition dataset
 
     It was released together with `Few-NERD: Not Only a Few-shot NER Dataset (Ning Ding et al. 2021) <https://arxiv.org/pdf/2105.07464.pdf>`_
-    
-    Examples:
-
-    ..  code-block:: python
-
-        from openprompt.data_utils.typing_dataset import PROCESSORS
-
-        base_path = "datasets/Typing"
-
-        dataset_name = "FewNERD"
-        dataset_path = os.path.join(base_path, dataset_name)
-        processor = PROCESSORS[dataset_name.lower()]()
-        train_dataset = processor.get_train_examples(dataset_path)
-        dev_dataset = processor.get_dev_examples(dataset_path)
-        test_dataset = processor.get_test_examples(dataset_path)
-
-        assert processor.get_num_labels() == 66
-        assert processor.get_labels() == [
-            "person-actor", "person-director", "person-artist/author", "person-athlete", "person-politician", "person-scholar", "person-soldier", "person-other",
-            "organization-showorganization", "organization-religion", "organization-company", "organization-sportsteam", "organization-education", "organization-government/governmentagency", "organization-media/newspaper", "organization-politicalparty", "organization-sportsleague", "organization-other",
-            "location-GPE", "location-road/railway/highway/transit", "location-bodiesofwater", "location-park", "location-mountain", "location-island", "location-other",
-            "product-software", "product-food", "product-game", "product-ship", "product-train", "product-airplane", "product-car", "product-weapon", "product-other",
-            "building-theater", "building-sportsfacility", "building-airport", "building-hospital", "building-library", "building-hotel", "building-restaurant", "building-other",
-            "event-sportsevent", "event-attack/battle/war/militaryconflict", "event-disaster", "event-election", "event-protest", "event-other",
-            "art-music", "art-writtenart", "art-film", "art-painting", "art-broadcastprogram", "art-other",
-            "other-biologything", "other-chemicalthing", "other-livingthing", "other-astronomything", "other-god", "other-law", "other-award", "other-disease", "other-medical", "other-language", "other-currency", "other-educationaldegree",
-        ]
-        assert dev_dataset[0].text_a == "The final stage in the development of the Skyfox was the production of a model with tricycle landing gear to better cater for the pilot training market ."
-        assert dev_dataset[0].meta["entity"] == "Skyfox"
-        assert dev_dataset[0].label == 30
     """
     def __init__(self):
         super().__init__()
@@ -511,8 +374,8 @@ PROCESSORS = {
     "dbpedia": DBpediaProcessor,
     "imdb": ImdbProcessor,
     "sst2": SST2Processor,
-    "mnlim": MnlimProcessor,
-    "mnlimm": MnlimmProcessor,
+    "mnli-m": MnlimProcessor,
+    "mnli-mm": MnlimmProcessor,
     "yahoo": YahooProcessor,
     "yelp": YelpProcessor,
     "snli": SnliProcessor,
