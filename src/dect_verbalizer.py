@@ -2,6 +2,7 @@ from inspect import Parameter
 import json
 import time
 from os import stat
+import os
 from transformers.file_utils import ModelOutput
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.utils.dummy_pt_objects import PreTrainedModel
@@ -37,7 +38,7 @@ class DecTVerbalizer(Verbalizer):
                  classes: Optional[List] = None,
                  num_classes: Optional[Sequence[str]] = None,
                  label_words: Optional[Union[Sequence[str], Mapping[str, str]]] = None,
-                 prefix: Optional[str] = " ",
+                 prefix: Optional[str] = "",
                  multi_token_handler: Optional[str] = "first",
                  post_log_softmax: Optional[bool] = True,
                  lr: Optional[float] = 1e-3,
@@ -45,6 +46,7 @@ class DecTVerbalizer(Verbalizer):
                  mid_dim: Optional[int] = 64,
                  epochs: Optional[int] = 5,
                  model_logits_weight: Optional[float] = 1,
+                 save_dir: Optional[str] = None,
                 ):
         super().__init__(tokenizer=tokenizer, num_classes=num_classes, classes=classes)
         self.prefix = prefix
@@ -54,7 +56,7 @@ class DecTVerbalizer(Verbalizer):
         self.mid_dim = mid_dim
         self.epochs = epochs
         self.model_logits_weight = model_logits_weight
-        
+        self.save_dir = save_dir
         self.hidden_dims = hidden_size
         self.head = nn.Linear(self.hidden_dims, self.mid_dim, bias=False)
         if label_words is not None: # use label words as an initialization
@@ -259,7 +261,7 @@ class DecTVerbalizer(Verbalizer):
 
     @staticmethod
     def sim(x, y, r=0, model_logits=0, model_logits_weight=1):
-        x = torch.unsqueeze(x, -2)
+        x = F.normalize(torch.unsqueeze(x, -2), p=2, dim=-1)
         dist = torch.norm((x - y), dim=-1) - model_logits * model_logits_weight - r
         return -dist
     
@@ -269,8 +271,52 @@ class DecTVerbalizer(Verbalizer):
         loss = -torch.mean(torch.log(pos_score / sim_mat.sum(-1)))
         
         return loss
+    
 
+    def test(self, model, dataloader):
+        batch_size = dataloader.batch_size
+        model.eval()
+        #print(self.label_words, self.label_words_ids)
+        model_preds, preds, labels = [], [], []
+        if os.path.isfile(f"{self.save_dir}/logits.pt"):
+            logits = torch.load(f"{self.save_dir}/logits.pt")
+            hiddens = torch.load(f"{self.save_dir}/hiddens.pt")
+            for i, batch in enumerate(dataloader):
+                batch = batch.cuda().to_dict()
+                length = len(batch['label'])
+                labels.extend(batch.pop('label').cpu().tolist())
+                batch_hidden, batch_logits = hiddens[i*batch_size: i*batch_size+length], logits[i*batch_size: i*batch_size+length]
+                proto = self.process_hiddens(batch_hidden, batch_logits)
+                model_pred = torch.argmax(batch_logits, dim=-1)
+                pred = torch.argmax(proto, dim=-1)
+                preds.extend(pred.cpu().tolist())
+                model_preds.extend(model_pred.cpu().tolist())
 
+        else:
+            logits, hiddens= [], []
+            with torch.no_grad():
+                for i, batch in enumerate(dataloader):
+                    batch = batch.cuda().to_dict()
+                    labels.extend(batch.pop('label').cpu().tolist())
+                    outputs = model.prompt_model(batch)
+                    outputs = self.gather_outputs(outputs)
+                    batch_hidden, batch_logits = model.extract_at_mask(outputs[0], batch), model.extract_at_mask(outputs[1], batch)
+                    model_logits = self.process_logits(batch_logits)
+                    logits.append(model_logits)
+                    hiddens.append(batch_hidden)
+                    proto = self.process_hiddens(batch_hidden, model_logits)
+                    model_pred = torch.argmax(model_logits, dim=-1)
+                    pred = torch.argmax(proto, dim=-1)
+                    preds.extend(pred.cpu().tolist())
+                    model_preds.extend(model_pred.cpu().tolist())
+            
+            logits = torch.cat(logits, dim=0)
+            hiddens = torch.cat(hiddens, dim=0)
+            
+            torch.save(logits, f"{self.save_dir}/logits.pt")
+            torch.save(hiddens, f"{self.save_dir}/hiddens.pt")
+        #print(logits[:10], logits.size())
+        return model_preds, preds, labels
 
     def train_proto(self, model, dataloader, calibrate_dataloader):
         model.eval()
@@ -281,12 +327,13 @@ class DecTVerbalizer(Verbalizer):
         start_time = time.time()
         with torch.no_grad():
             # collect calibration logits
-            for i, batch in enumerate(calibrate_dataloader):
-                batch = batch.cuda().to_dict()
-                outputs = model.prompt_model(batch)
-                outputs = self.gather_outputs(outputs)
-                logits = self.project(model.extract_at_mask(outputs[1], batch))
-                self._calibrate_logits = logits / torch.mean(logits)
+            if calibrate_dataloader is not None:
+                for i, batch in enumerate(calibrate_dataloader):
+                    batch = batch.cuda().to_dict()
+                    outputs = model.prompt_model(batch)
+                    outputs = self.gather_outputs(outputs)
+                    logits = self.project(model.extract_at_mask(outputs[1], batch))
+                    self._calibrate_logits = logits / torch.mean(logits)
 
             # collect model logits and hidden states
             for i, batch in enumerate(dataloader):

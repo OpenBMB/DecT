@@ -36,6 +36,7 @@ class DecTRunner(object):
                  test_dataloader: Optional[PromptDataLoader] = None,
                  calibrate_dataloader: Optional[PromptDataLoader] = None,
                  id2label: Optional[Dict] = None,
+                 verbalizer = None,
                  ):
         self.model = model.cuda()
         self.train_dataloader = train_dataloader
@@ -44,6 +45,7 @@ class DecTRunner(object):
         self.calibrate_dataloader = calibrate_dataloader
         self.loss_function = torch.nn.CrossEntropyLoss()
         self.id2label = id2label
+        self.verbalizer = verbalizer
         self.clean = True
     
     def inference_step(self, batch, batch_idx):
@@ -54,15 +56,15 @@ class DecTRunner(object):
     
     def inference_epoch(self, split: str): 
         outputs = []
+        scores = {}
         self.model.eval()
         with torch.no_grad():
             data_loader = self.valid_dataloader if split=='validation' else self.test_dataloader
-            for batch_idx, batch in enumerate(data_loader):
-                batch = batch.cuda().to_dict()
-                outputs.append( self.inference_step(batch, batch_idx) )
-
-        score = self.inference_epoch_end(outputs)
-        return score 
+            model_preds, preds, labels = self.verbalizer.test(self.model, data_loader)
+            # zs_score = accuracy_score(labels, model_preds)
+            score = accuracy_score(labels, preds)
+            scores = {"dect acc": score}
+        return scores
 
     def inference_epoch_end(self, outputs):
         preds = []
@@ -86,10 +88,8 @@ class DecTRunner(object):
                 logger.warning("Train from scratch instead ...")
 
         self.model.verbalizer.train_proto(self.model, self.train_dataloader, self.calibrate_dataloader)
-        
-        score = self.inference_epoch("validation")
 
-        return score
+        return 0
     
     def test(self, ckpt: Optional[str] = None) -> dict:
         if ckpt:

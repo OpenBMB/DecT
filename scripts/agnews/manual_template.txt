@@ -1,3 +1,0 @@
-[ Topic : {"mask"} ] {"placeholder": "text_a"} {"placeholder": "text_b"}
-[ Category : {"mask"} ] {"placeholder": "text_a"} {"placeholder": "text_b"}
-{"mask"} Alert Blog Dialogue Diary Accountability {"placeholder": "text_a"} {"placeholder": "text_b"}
