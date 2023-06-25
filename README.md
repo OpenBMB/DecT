@@ -1,6 +1,6 @@
 # DecT
 
-Source code for Decoder Tuning
+Source code for ACL 2023 paper [Decoder Tuning](https://arxiv.org/abs/2212.08408)
 
 ## Installation
 
